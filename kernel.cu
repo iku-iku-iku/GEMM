@@ -3,25 +3,29 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
-
-#include <stdio.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 
-__global__ void matrixMulKernel(float* A, float* B, float* C, int N) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row < N && col < N) {
-        float sum = 0;
-        for (int i = 0; i < N; ++i) {
-            sum += A[row * N + i] * B[i * N + col];
+#define BLOCK_DIM 16
+
+__global__ void sgemm_naive(int M, int N, int K, float alpha, const float* A,
+    const float* B, float beta, float* C) {
+    // compute position in C that this thread is responsible for
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // `if` condition is necessary for when M or N aren't multiples of 32.
+    if (x < M && y < N) {
+        float tmp = 0.0;
+        for (int i = 0; i < K; ++i) {
+            tmp += A[x * K + i] * B[i * N + y];
         }
-        C[row * N + col] = sum;
+        // C = α*(A@B)+β*C
+        C[x * N + y] = alpha * tmp + beta * C[x * N + y];
     }
 }
 
 int main() {
-    int N = 1024;
+    size_t N = 4092;
     size_t size = N * N * sizeof(float);
     float* h_A, * h_B, * h_C;
     float* d_A, * d_B, * d_C;
@@ -34,7 +38,6 @@ int main() {
     cudaMalloc(&d_B, size);
     cudaMalloc(&d_C, size);
 
-    // Initialize host matrices
     for (int i = 0; i < N * N; ++i) {
         h_A[i] = rand() / (float)RAND_MAX;
         h_B[i] = rand() / (float)RAND_MAX;
@@ -43,10 +46,10 @@ int main() {
     cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 blocksPerGrid(N / threadsPerBlock.x, N / threadsPerBlock.y);
+    dim3 dimGrid(N / BLOCK_DIM, N / BLOCK_DIM);
+    dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
 
-    matrixMulKernel << <blocksPerGrid, threadsPerBlock >> > (d_A, d_B, d_C, N);
+    sgemm_naive << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
 
     cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
 
