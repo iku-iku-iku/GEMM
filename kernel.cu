@@ -5,13 +5,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define BLOCK_DIM 16
+#define CEIL_DIV(x, y) ((x + y - 1) / y)
+
+#define BLOCK_DIM 32
 
 __global__ void sgemm_naive(int M, int N, int K, float alpha, const float* A,
     const float* B, float beta, float* C) {
     // compute position in C that this thread is responsible for
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int x = blockIdx.x * BLOCK_DIM + threadIdx.x / BLOCK_DIM;
+    const int y = blockIdx.y * BLOCK_DIM + threadIdx.x % BLOCK_DIM;
 
     // `if` condition is necessary for when M or N aren't multiples of 32.
     if (x < M && y < N) {
@@ -46,8 +48,8 @@ int main() {
     cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
 
-    dim3 dimGrid(N / BLOCK_DIM, N / BLOCK_DIM);
-    dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
+    dim3 dimGrid(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(N, BLOCK_DIM));
+    dim3 dimBlock(BLOCK_DIM * BLOCK_DIM);
 
     sgemm_naive << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
 
