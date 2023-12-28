@@ -12,24 +12,33 @@
 #define BK 8
 #define BN 64
 #define TM 8
-#define BLOCKDIM_X (BM * BK)
+#define TN 8
+
+#define BLOCKDIM_X (BM / TM)
+#define BLOCKDIM_Y (BN / TN)
+#define BLOCKSIZE (BLOCKDIM_X * BLOCKDIM_Y)
 
 __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A,
     const float* B, float beta, float* C) {
     // compute position in C that this thread is responsible for
-    const int threadRow = threadIdx.x / BN;
-    const int threadCol = threadIdx.x % BN;
+    const int threadRow = threadIdx.x / BLOCKDIM_Y;
+    const int threadCol = threadIdx.x % BLOCKDIM_Y;
     const int bx = blockIdx.x;
     const int by = blockIdx.y;
     const int x = blockIdx.x * BN + threadRow * TM;
-    const int y = blockIdx.y * BM + threadCol;
+    const int y = blockIdx.y * BM + threadCol * TN;
 
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
-    float threadResults[TM] = { 0.0 };
+    float threadResults[TM * TN] = { 0.0 };
+    float regM[TM] = { 0.0 };
+    float regN[TN] = { 0.0 };
 
-    const int innerRowA = threadIdx.x / BK, innerColA = threadIdx.x % BK;
-    const int innerRowB = threadIdx.x / BN, innerColB = threadIdx.x % BN;
+    const int innerRowA = threadIdx.x / (BK / 4), innerColA = threadIdx.x % (BK / 4);
+    const int innerRowB = threadIdx.x / (BN / 4), innerColB = threadIdx.x % (BN / 4);
+
+    const int strideA = BLOCKSIZE / (BK / 4);
+    const int strideB = BLOCKSIZE / (BN / 4);
 
     // `if` condition is necessary for when M or N aren't multiples of 32.
     if (x < M && y < N) {
@@ -43,8 +52,21 @@ __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A
         for (int bkIdx = 0; bkIdx < K; bkIdx += BK) {
             // Have each thread load one of the elements in A & B from
             // global memory into shared memory.
-            As[innerRowA * BK + innerColA] = A[innerRowA * K + innerColA];
-            Bs[innerRowB * BN + innerColB] = B[innerRowB * N + innerColB];
+            for (int loadOffset = 0; loadOffset < BM; loadOffset += strideA) {
+                //*(float4*)&As[(innerRowA + loadOffset) * BK + innerColA * 4] = 
+                //    *(float4*)&A[(innerRowA + loadOffset) * K + innerColA * 4];
+                float4 tmp =
+                    *(float4*)&A[(innerRowA + loadOffset) * K + innerColA * 4];
+
+                As[(innerColA * 4 + 0) * BM + innerRowA + loadOffset] = tmp.x;
+                As[(innerColA * 4 + 1) * BM + innerRowA + loadOffset] = tmp.y;
+                As[(innerColA * 4 + 2) * BM + innerRowA + loadOffset] = tmp.z;
+                As[(innerColA * 4 + 3) * BM + innerRowA + loadOffset] = tmp.w;
+            }
+            for (int loadOffset = 0; loadOffset < BK; loadOffset += strideB) {
+                *(float4*)&Bs[(innerRowB + loadOffset) * BN + innerColB * 4] = 
+                    *(float4*)&B[(innerRowB + loadOffset) * N + innerColB * 4];
+            }
 
             // block threads in this block until cache is fully populated
             __syncthreads();
@@ -55,9 +77,16 @@ __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A
 
             // execute the dotproduct on the currently cached block
             for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-				float Btmp = Bs[dotIdx * BN + threadCol];
-                for (int resIdx = 0; resIdx < TM; ++resIdx) {
-                    threadResults[resIdx] += As[(threadRow * TM + resIdx) * BK + dotIdx] * Btmp;
+                for (int i = 0; i < TM; i+=4) {
+                    *(float4*)&regM[i] = *(float4*)&As[dotIdx * BM + (threadRow * TM + i)];
+                }
+                for (int i = 0; i < TN; i+=4) {
+                    *(float4*)&regN[i] = *(float4*)&Bs[dotIdx * BN + threadCol * TN + i];
+                }
+				for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
+					for (int resIdxN = 0; resIdxN < TN; ++resIdxN) {
+                        threadResults[resIdxM * TN + resIdxN] += regM[resIdxM] * regN[resIdxN];
+                    }
                 }
             }
             // need to sync again at the end, to avoid faster threads
@@ -65,9 +94,11 @@ __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A
             __syncthreads();
         }
 
-        for (int resIdx = 0; resIdx < TM; ++resIdx) {
-			C[(threadRow * TM + resIdx) * N + threadCol] =
-				alpha * threadResults[resIdx] + beta * C[(threadRow * TM + resIdx) * N + threadCol];
+        for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
+            for (int resIdxN = 0; resIdxN < TN; ++resIdxN) {
+                C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN] =
+                    alpha * threadResults[resIdxM * TN + resIdxN] + beta * C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN];
+            }
         }
     }
 }
@@ -99,7 +130,7 @@ int main() {
     cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
 
     dim3 dimGrid(CEIL_DIV(N, BM), CEIL_DIV(N, BN));
-    dim3 dimBlock(BLOCKDIM_X);
+    dim3 dimBlock(BLOCKSIZE);
 
     sgemm_multi_res << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
 
