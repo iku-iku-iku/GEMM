@@ -8,17 +8,31 @@
 #include <stdlib.h>
 
 #define CEIL_DIV(x, y) ((x + y - 1) / y)
-
 #define DEBUG 0
 #define BM 64
-#define BK 8
 #define BN 64
-#define TM 8
-#define TN 8
+#define BK 16
+#define TM 4
+#define TN 4
+
+#if DEBUG
+size_t N = 1024;
+#else
+size_t N = 4092;
+#endif
 
 #define BLOCKDIM_X (BM / TM)
 #define BLOCKDIM_Y (BN / TN)
 #define BLOCKSIZE (BLOCKDIM_X * BLOCKDIM_Y)
+
+#define CHECK_CUDA_ERROR(call) { \
+    cudaError_t error = call; \
+    if (error != cudaSuccess) { \
+        printf("CUDA error: %s, line %d\n", cudaGetErrorString(error), __LINE__); \
+        cudaDeviceReset(); \
+        exit(1); \
+    } \
+}
 
 __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A,
     const float* B, float beta, float* C) {
@@ -99,11 +113,7 @@ __global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A
 }
 
 int main() {
-#if DEBUG
-    size_t N = 1024;
-#else
-    size_t N = 4092;
-#endif
+    cudaDeviceReset();
     size_t size = N * N * sizeof(float);
     float* h_A, * h_B, * h_C;
     float* d_A, * d_B, * d_C;
@@ -133,10 +143,10 @@ int main() {
     cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
     end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
+    CHECK_CUDA_ERROR(cudaGetLastError());
 
     // 输出执行时间
     std::cout << duration.count() * 1000 << "ms" << std::endl;
-
 
 #if DEBUG
     // Validate the result
