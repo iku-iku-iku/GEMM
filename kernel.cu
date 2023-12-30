@@ -2,6 +2,8 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+#include <iostream>
+#include <chrono>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -131,10 +133,17 @@ int main() {
 
     dim3 dimGrid(CEIL_DIV(N, BM), CEIL_DIV(N, BN));
     dim3 dimBlock(BLOCKSIZE);
-
+    std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
+    start = std::chrono::high_resolution_clock::now();
     sgemm_multi_res << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
 
     cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
+    end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> duration = end - start;
+
+    // 输出执行时间
+    std::cout << duration.count() * 1000 << "ms" << std::endl;
+
 
 #if DEBUG
     // Validate the result
