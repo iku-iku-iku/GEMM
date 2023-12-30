@@ -9,11 +9,11 @@
 
 #define CEIL_DIV(x, y) ((x + y - 1) / y)
 #define DEBUG 0
-#define BM 64
-#define BN 64
+#define BM 128
+#define BN 128
 #define BK 16
-#define TM 4
-#define TN 4
+#define TM 8
+#define TN 8
 
 #if DEBUG
 size_t N = 1024;
@@ -34,7 +34,7 @@ size_t N = 4092;
     } \
 }
 
-__global__ void sgemm_multi_res(int M, int N, int K, float alpha, const float* A,
+__global__ void sgemm(int M, int N, int K, float alpha, const float* A,
     const float* B, float beta, float* C) {
     // compute position in C that this thread is responsible for
     const int threadRow = threadIdx.x / BLOCKDIM_Y;
@@ -145,7 +145,7 @@ int main() {
     dim3 dimBlock(BLOCKSIZE);
     std::chrono::time_point<std::chrono::high_resolution_clock> start, end;
     start = std::chrono::high_resolution_clock::now();
-    sgemm_multi_res << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
+    sgemm << <dimGrid, dimBlock >> > (N, N, N, 1, d_A, d_B, 0, d_C);
 
     cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
     end = std::chrono::high_resolution_clock::now();
