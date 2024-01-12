@@ -9,6 +9,7 @@ PARAMETER_SPACE = {
     "BK": [4, 8, 16],
     "TM": [4, 8, 16],
     "TN": [4, 8, 16],
+    "WARPDIM": [4, 8, 16],
 }
 
 best_time = float("inf")
