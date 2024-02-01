@@ -101,25 +101,26 @@ __global__ void sgemm(int M, int N, int K, float alpha, const float *A,
       B += BK * N;
 
       // execute the dotproduct on the currently cached block
-	  for (int wmidx = 0; wmidx < WMITER; ++wmidx) {
-		  for (int wnidx = 0; wnidx < WNITER; ++wnidx) {
-              for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-                  for (int i = 0; i < TM; i += 4) {
-                      *(float4*)&regM[i] =
-                          *(float4*)&As[dotIdx * BM + (wmidx * WM + threadRow * TM + i)];
-                  }
-                  for (int i = 0; i < TN; i += 4) {
-                      *(float4*)&regN[i] =
-                          *(float4*)&Bs[dotIdx * BN + (wnidx * WN) + threadCol * TN + i];
-                  }
-                  for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
-                      for (int resIdxN = 0; resIdxN < TN; ++resIdxN) {
-                          threadResults[(wmidx * TM + resIdxM) * (TN * WNITER) + wnidx * TN + resIdxN] +=
-                              regM[resIdxM] * regN[resIdxN];
-                      }
-                  }
+      for (int wmidx = 0; wmidx < WMITER; ++wmidx) {
+        for (int wnidx = 0; wnidx < WNITER; ++wnidx) {
+          for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
+            for (int i = 0; i < TM; i += 4) {
+              *(float4 *)&regM[i] = *(
+                  float4 *)&As[dotIdx * BM + (wmidx * WM + threadRow * TM + i)];
+            }
+            for (int i = 0; i < TN; i += 4) {
+              *(float4 *)&regN[i] = *(
+                  float4 *)&Bs[dotIdx * BN + (wnidx * WN) + threadCol * TN + i];
+            }
+            for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
+              for (int resIdxN = 0; resIdxN < TN; ++resIdxN) {
+                threadResults[(wmidx * TM + resIdxM) * (TN * WNITER) +
+                              wnidx * TN + resIdxN] +=
+                    regM[resIdxM] * regN[resIdxN];
               }
+            }
           }
+        }
       }
       // need to sync again at the end, to avoid faster threads
       // fetching the next block into the cache before slower threads are done
@@ -127,22 +128,23 @@ __global__ void sgemm(int M, int N, int K, float alpha, const float *A,
     }
 
     for (int wmidx = 0; wmidx < WMITER; ++wmidx) {
-        for (int wnidx = 0; wnidx < WNITER; ++wnidx) {
-            float* CW = C + (wmidx * WM) * N + wnidx * WN;
-            for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
-                for (int resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-                    float4 c4 = *(float4*)&CW[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN];
-                    float4 tmp = *(float4*)&threadResults[resIdxM * TN + resIdxN];
-                    tmp.x = tmp.x * alpha + c4.x * beta;
-                    tmp.y = tmp.y * alpha + c4.y * beta;
-                    tmp.z = tmp.z * alpha + c4.z * beta;
-                    tmp.w = tmp.w * alpha + c4.w * beta;
-                    *(float4*)&CW[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN] = tmp;
-                }
-            }
+      for (int wnidx = 0; wnidx < WNITER; ++wnidx) {
+        float *CW = C + (wmidx * WM) * N + wnidx * WN;
+        for (int resIdxM = 0; resIdxM < TM; ++resIdxM) {
+          for (int resIdxN = 0; resIdxN < TN; resIdxN += 4) {
+            float4 c4 = *(float4 *)&CW[(threadRow * TM + resIdxM) * N +
+                                       threadCol * TN + resIdxN];
+            float4 tmp = *(float4 *)&threadResults[resIdxM * TN + resIdxN];
+            tmp.x = tmp.x * alpha + c4.x * beta;
+            tmp.y = tmp.y * alpha + c4.y * beta;
+            tmp.z = tmp.z * alpha + c4.z * beta;
+            tmp.w = tmp.w * alpha + c4.w * beta;
+            *(float4 *)&CW[(threadRow * TM + resIdxM) * N + threadCol * TN +
+                           resIdxN] = tmp;
+          }
         }
+      }
     }
-
   }
 }
 
