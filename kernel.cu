@@ -1,5 +1,4 @@
-﻿
-#include "cuda_runtime.h"
+﻿#include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
 #include <chrono>
@@ -21,10 +20,13 @@ size_t N = 1024;
 size_t N = 4092;
 #endif
 
-#define BLOCKDIM_X (BM / TM)
-#define BLOCKDIM_Y (BN / TN)
-#define WARPDIM 16
-#define BLOCKSIZE (BLOCKDIM_X * BLOCKDIM_Y)
+#define WARPDIM 8
+#define BLOCKSIZE (WARPDIM * WARPDIM)
+
+#define WM (TM * WARPDIM)
+#define WN (TN * WARPDIM)
+#define WMITER (CEIL_DIV(BM, WM))
+#define WNITER (CEIL_DIV(BN, WN))
 
 #define CHECK_CUDA_ERROR(call)                                                 \
   {                                                                            \
@@ -46,10 +48,6 @@ __global__ void sgemm(int M, int N, int K, float alpha, const float *A,
   const int by = blockIdx.y;
   const int x = blockIdx.x * BN + threadRow * TM;
   const int y = blockIdx.y * BM + threadCol * TN;
-  const int WM = TM * WARPDIM;
-  const int WN = TN * WARPDIM;
-  const int WMITER = CEIL_DIV(BM, WM);
-  const int WNITER = CEIL_DIV(BN, WN);
 
   __shared__ float As[BM * BK];
   __shared__ float Bs[BK * BN];
